@@ -1,0 +1,15 @@
+ai-video-generator/
+├── client/              # React Frontend
+│   ├── public/
+│   ├── src/
+│   │   └── index.css    
+│   ├── package.json
+│   └── tailwind.config.js 
+│
+└── server/              # Node.js Backend
+    ├── node_modules/
+    ├── .env             # Will create this for API keys
+    ├── .env.example     # Will create this as a template
+    ├── package.json
+    └── src/
+        └── index.js     # We will create this server entry point
