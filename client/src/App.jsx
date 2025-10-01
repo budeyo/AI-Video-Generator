@@ -2,42 +2,59 @@ import { useState } from 'react';
 import Header from './components/Header';
 import PromptInput from './components/PromptInput';
 import VideoPreview from './components/VideoPreview';
+import AssetUploader from './components/AssetUploader';
 
 // Define the backend URL. Make sure your server is running.
 const API_URL = 'http://localhost:5001';
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
+  const [userAssets, setUserAssets] = useState([]); 
   const [isLoading, setIsLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
-  const [error, setError] = useState(null); // State for handling errors
+  const [error, setError] = useState(null);
 
   const handleGenerateVideo = async () => {
-    if (!prompt) {
-      alert('Please enter a prompt.');
+    // Basic validation
+    if (!prompt && userAssets.length === 0) {
+      alert('Please enter a prompt or upload some assets.');
       return;
     }
 
-    console.log('Calling backend to generate video for:', prompt);
     setIsLoading(true);
     setVideoUrl(null);
     setError(null);
 
     try {
-      const response = await fetch(`${API_URL}/api/generate-video`, {
+      let assetUrls = [];
+
+      // Step 1: Upload assets if they exist
+      if (userAssets.length > 0) {
+        const formData = new FormData();
+        userAssets.forEach(file => {
+          formData.append('assets', file);
+        });
+
+        const uploadResponse = await fetch(`${API_URL}/api/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!uploadResponse.ok) throw new Error('File upload failed.');
+        const uploadData = await uploadResponse.json();
+        assetUrls = uploadData.assetUrls;
+      }
+      
+      // Step 2: Call generate-video with either a prompt or the new asset URLs
+      const generationResponse = await fetch(`${API_URL}/api/generate-video`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ prompt }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, userAssetUrls: assetUrls }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate video. Please try again.');
-      }
-
-      const data = await response.json();
-      setVideoUrl(data.videoUrl);
+      if (!generationResponse.ok) throw new Error('Video generation failed.');
+      const generationData = await generationResponse.json();
+      setVideoUrl(generationData.videoUrl);
 
     } catch (err) {
       console.error(err);
@@ -57,7 +74,7 @@ export default function App() {
           handleGenerate={handleGenerateVideo}
           isLoading={isLoading}
         />
-        {/* Pass error to VideoPreview to display it */}
+        <AssetUploader assets={userAssets} setAssets={setUserAssets} />
         <VideoPreview videoUrl={videoUrl} isLoading={isLoading} error={error} />
       </main>
     </div>

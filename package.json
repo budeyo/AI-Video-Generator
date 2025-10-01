@@ -1,0 +1,25 @@
+{
+  "name": "mern-app",
+  "version": "1.0.0",
+  "description": "AI Video Generator App",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "preview": "cd client && npm run preview",
+    "start": "cd server && npm start",
+    "lint": "cd client && npm run lint",
+    "install-server": "cd server && npm install",
+    "install-client": "cd client && npm install",
+    "install-all": "npm run install-server && npm run install-client",
+    "install-root": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
