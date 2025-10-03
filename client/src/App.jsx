@@ -3,9 +3,10 @@ import Header from './components/Header';
 import PromptInput from './components/PromptInput';
 import VideoPreview from './components/VideoPreview';
 import AssetUploader from './components/AssetUploader';
+import ControlsPanel from './components/ControlsPanel'; 
 
 // Define the backend URL. Make sure your server is running.
-const API_URL = 'http://localhost:5001';
+const API_URL = import.meta.env.VITE_API_URL;
 
 export default function App() {
   const [prompt, setPrompt] = useState('');
@@ -13,6 +14,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState(null);
+  
 
   const handleGenerateVideo = async () => {
     // Basic validation
@@ -76,6 +78,8 @@ export default function App() {
         />
         <AssetUploader assets={userAssets} setAssets={setUserAssets} />
         <VideoPreview videoUrl={videoUrl} isLoading={isLoading} error={error} />
+        <ControlsPanel videoUrl={videoUrl} isLoading={isLoading} />
+
       </main>
     </div>
   );

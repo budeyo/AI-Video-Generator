@@ -10,14 +10,9 @@ import ffmpeg from 'fluent-ffmpeg';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Helper to download a file from a URL
 const downloadFile = async (url, outputPath) => {
-  const response = await axios({
-    url,
-    method: 'GET',
-    responseType: 'stream',
-  });
   const writer = fs.createWriteStream(outputPath);
+  const response = await axios({ url, method: 'GET', responseType: 'stream' });
   response.data.pipe(writer);
   return new Promise((resolve, reject) => {
     writer.on('finish', resolve);
@@ -25,28 +20,16 @@ const downloadFile = async (url, outputPath) => {
   });
 };
 
-// Helper to get a local file path from a server URL
 const getLocalPathFromUrl = (url) => {
-    try {
-        const urlObj = new URL(url);
-        // e.g., '/static/uploads/...' -> 'public/uploads/...'
-        const localPath = path.join(__dirname, '../../', urlObj.pathname.replace('/static/', 'public/'));
-        return localPath;
-    } catch (error) {
-        console.error("Invalid URL for local path conversion:", url, error);
-        return null;
-    }
+    const urlObj = new URL(url);
+    return path.join(__dirname, '../../', urlObj.pathname.replace('/static/', 'public/'));
 }
 
 // --- Multer Configuration ---
-// This sets up where to store uploaded files and how to name them.
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Create uploads directory if it doesn't exist
     const uploadDir = 'public/uploads/';
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
+    fs.mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
@@ -54,150 +37,112 @@ const storage = multer.diskStorage({
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
   },
 });
-
 const upload = multer({ storage: storage });
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = new OpenAI();
 
-// --- Controller for handling asset uploads ---
+// --- Controllers ---
 export const uploadAssets = [
-  upload.array('assets', 5), // 'assets' is the field name, 5 is the max file count
+  upload.array('assets', 5),
   (req, res) => {
-    try {
-      if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: 'No files were uploaded.' });
-      }
-      // Construct the URLs for the uploaded files
-      const assetUrls = req.files.map(file => 
-        `${req.protocol}://${req.get('host')}/static/uploads/${file.filename}`
-      );
-      res.json({ 
-        success: true,
-        message: 'Files uploaded successfully',
-        assetUrls 
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({ 
-        success: false,
-        error: 'Failed to upload files' 
-      });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files were uploaded.' });
     }
+    const assetUrls = req.files.map(file =>
+      `${req.protocol}://${req.get('host')}/static/uploads/${file.filename}`
+    );
+    res.json({ assetUrls });
   }
 ];
 
-// --- Updated generateVideo Controller ---
 export const generateVideo = async (req, res) => {
   const { prompt, userAssetUrls } = req.body;
-  
   if (!prompt && (!userAssetUrls || userAssetUrls.length === 0)) {
-    return res.status(400).json({ 
-      success: false,
-      error: 'A prompt or uploaded assets are required' 
-    });
+    return res.status(400).json({ error: 'A prompt or uploaded assets are required' });
   }
 
   try {
-    let imageUrls = []; // Fixed: Declare imageUrls variable
-
     // --- 1. Asset Gathering ---
+    let sourceImageUrls = [];
     if (userAssetUrls && userAssetUrls.length > 0) {
-      console.log('✅ Using user-provided assets:', userAssetUrls);
-      imageUrls = userAssetUrls;
+      sourceImageUrls = userAssetUrls;
     } else {
-      console.log('🎨 Generating images with DALL-E...');
-      
-      // Generate multiple images for the video
-      const imageGenerationPromises = Array.from({ length: 3 }).map((_, i) =>
+      const imagePromises = Array.from({ length: 3 }).map(() =>
         openai.images.generate({
           model: "dall-e-3",
-          prompt: `Scene ${i+1}/3 for a video. A cinematic shot for: "${prompt}"`,
+          prompt: `Cinematic shot for a video about: "${prompt}"`,
           n: 1,
           size: "1792x1024",
         })
       );
-      
-      const imageResults = await Promise.all(imageGenerationPromises);
-      imageUrls = imageResults.map(result => result.data[0].url);
-      console.log('✅ Images generated successfully:', imageUrls);
+      const imageResults = await Promise.all(imagePromises);
+      sourceImageUrls = imageResults.map(res => res.data[0].url);
     }
+    console.log('✅ Visual assets ready:', sourceImageUrls);
 
     // --- 2. Audio Generation ---
-    console.log('🎙️ Generating voiceover script with GPT-4...');
-    
-    // Generate a script
+    // ***FIX***: Handle the no-prompt scenario for script generation
+    const scriptPrompt = prompt || "A short, inspiring slideshow of images.";
     const scriptResponse = await openai.chat.completions.create({
       model: "gpt-4-turbo",
-      messages: [
-        {
-          role: "system",
-          content: "You are a concise scriptwriter for short social media videos. Based on the user's prompt, create a short, engaging voiceover script that is no more than 50 words."
-        },
-        {
-          role: "user",
-          content: `The video is about: "${prompt}"`
-        }
-      ],
+      messages: [{ role: "system", content: "You are a concise scriptwriter. Create a short, engaging voiceover script (max 50 words) for the following topic." }, { role: "user", content: scriptPrompt }],
     });
-    
     const script = scriptResponse.choices[0].message.content;
-    console.log('📜 Script:', script);
-
-    // Generate audio from the script
-    console.log('🔊 Generating audio with TTS...');
-    
-    // Ensure uploads directory exists
-    const uploadsDir = path.resolve('./public/uploads');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-    
-    const speechFile = path.join(uploadsDir, `speech-${Date.now()}.mp3`);
-    
-    const mp3 = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: "alloy",
-      input: script,
-    });
-    
-    // Save the audio to a file
+    const speechFile = path.resolve(`./public/uploads/speech-${Date.now()}.mp3`);
+    const mp3 = await openai.audio.speech.create({ model: "tts-1", voice: "alloy", input: script });
     const buffer = Buffer.from(await mp3.arrayBuffer());
     await fs.promises.writeFile(speechFile, buffer);
+    const audioUrl = `${req.protocol}://${req.get('host')}/static/uploads/${path.basename(speechFile)}`;
+    console.log('✅ Audio asset ready:', audioUrl);
     
-    const audioFilename = path.basename(speechFile);
-    const audioUrl = `${req.protocol}://${req.get('host')}/static/uploads/${audioFilename}`;
-    
-    console.log('✅ Audio generated successfully:', audioUrl);
+    // --- 3. Localize Assets for FFmpeg ---
+    console.log('⬇️ Localizing assets for processing...');
+    const localImagePaths = await Promise.all(
+        sourceImageUrls.map(async (url) => {
+            if (url.startsWith('http://localhost') || url.startsWith('https://' + req.get('host'))) {
+                return getLocalPathFromUrl(url);
+            } else {
+                const localPath = path.resolve(`./public/uploads/image-${Date.now()}-${Math.random()}.jpg`);
+                await downloadFile(url, localPath);
+                return localPath;
+            }
+        })
+    );
+    const localAudioPath = getLocalPathFromUrl(audioUrl);
 
-    // --- 3. Video Generation (Placeholder - you'll need to implement this) ---
-    console.log('🎬 Starting video generation process...');
-    
-    // TODO: Implement actual video generation with ffmpeg
-    // This would involve:
-    // - Downloading the generated images
-    // - Creating a video slideshow with the images and audio
-    // - Using ffmpeg to combine everything
-    
-    // For now, return the assets with a placeholder video
-    res.json({
-      success: true,
-      message: 'Video assets generated successfully!',
-      imageUrls: imageUrls,
-      audioUrl: audioUrl,
-      script: script,
-      videoUrl: null, // You'll update this when video generation is implemented
-      status: 'assets_ready'
+    // ***FIX***: Re-integrated the FFmpeg video processing logic
+    // --- 4. FFmpeg Video Processing ---
+    console.log('🎬 Starting video creation with FFmpeg...');
+    const outputFileName = `video-${Date.now()}.mp4`;
+    const outputPath = path.resolve(`./public/outputs/${outputFileName}`);
+
+    await new Promise((resolve, reject) => {
+        const command = ffmpeg();
+        // Create a text file with image durations for a robust slideshow
+        const fileListPath = path.resolve(`./public/uploads/filelist-${Date.now()}.txt`);
+        const fileContent = localImagePaths.map(p => `file '${p}'\nduration 5`).join('\n');
+        fs.writeFileSync(fileListPath, fileContent);
+
+        command
+            .input(fileListPath)
+            .inputOptions(['-f concat', '-safe 0'])
+            .input(localAudioPath)
+            .outputOptions(['-c:v libx264', '-c:a aac', '-pix_fmt yuv420p', '-shortest'])
+            .on('end', () => { console.log('✅ FFmpeg processing finished.'); resolve(); })
+            .on('error', (err) => { console.error('❌ FFmpeg error:', err); reject(err); })
+            .save(outputPath);
     });
+
+    // Cleanup temporary files
+    localImagePaths.forEach(p => fs.unlinkSync(p));
+    fs.unlinkSync(localAudioPath);
+    // You could also delete the file list here if you created one
+
+    const finalVideoUrl = `${req.protocol}://${req.get('host')}/static/outputs/${outputFileName}`;
+    res.json({ message: 'Video created successfully!', videoUrl: finalVideoUrl });
 
   } catch (error) {
-    console.error('Error during AI video generation:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to generate video assets.',
-      details: error.message 
-    });
+    console.error('Error in generateVideo:', error);
+    res.status(500).json({ error: 'Failed to generate video.' });
   }
 };
